@@ -34,3 +34,26 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+Tools for logs/metrics/observability
+
+Agent + LLM behavior
+
+LiveKit Agents metrics hooks (built-in metrics in the agent SDK).
+Langfuse or Helicone for LLM tracing, prompts, latency, token usage.
+OpenTelemetry + OTLP exporter for unified traces (to Grafana Tempo/Datadog/etc).
+Backend/API monitoring
+
+Sentry for errors and performance traces.
+Prometheus + Grafana for request metrics + custom counters.
+Loki/OpenSearch/ELK for structured logs.
+Frontend/product analytics
+
+PostHog (events + session replay) or Amplitude/Mixpanel for product analytics.
+Vercel Analytics/Speed Insights for web performance.
+User tracking (who/where/how long)
+
+PostHog/Amplitude for user activity + cohorts.
+Store server‑side events (session start/end, duration, uploads) in your DB for accuracy.
+If you need geo, resolve IP at the edge and store a coarse region.
+# alora-web-app
