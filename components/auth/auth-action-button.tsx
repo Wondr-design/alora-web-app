@@ -22,7 +22,8 @@ export function AuthActionButton({
 
     supabase.auth.getSession().then(({ data }) => {
       if (!isMounted) return
-      setIsAuthenticated(Boolean(data.session))
+      const isAnonymous = Boolean(data.session?.user?.is_anonymous)
+      setIsAuthenticated(Boolean(data.session && !isAnonymous))
       setIsInitialized(true)
     })
 
@@ -30,7 +31,8 @@ export function AuthActionButton({
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!isMounted) return
-      setIsAuthenticated(Boolean(session))
+      const isAnonymous = Boolean(session?.user?.is_anonymous)
+      setIsAuthenticated(Boolean(session && !isAnonymous))
       setIsInitialized(true)
     })
 

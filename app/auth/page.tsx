@@ -17,7 +17,7 @@ export default async function AuthPage() {
     data: { session },
   } = await supabase.auth.getSession()
 
-  if (session) redirect("/")
+  if (session && !session.user?.is_anonymous) redirect("/")
 
   return <AuthScreen />
 }

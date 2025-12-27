@@ -10,10 +10,6 @@ const api = axios.create({
   baseURL: apiBaseUrl,
 });
 
-const appApi = axios.create({
-  baseURL: "",
-});
-
 export type DocumentType =
   | "cv"
   | "resume"
@@ -225,7 +221,7 @@ export const apiClient = {
       formData.append("document_type", documentType);
       formData.append("file", file);
 
-      const res = await appApi.post<DocumentResponse>(
+      const res = await api.post<DocumentResponse>(
         "/documents/upload",
         formData,
         {
@@ -244,7 +240,7 @@ export const apiClient = {
     documentType: DocumentType
   ): Promise<DocumentResponse> {
     try {
-      const res = await appApi.post<DocumentResponse>("/documents/text", {
+      const res = await api.post<DocumentResponse>("/documents/text", {
         session_id: sessionId,
         content,
         document_type: documentType,
