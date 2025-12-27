@@ -1,22 +1,22 @@
-import { createServerClient } from "@supabase/ssr"
-import { cookies } from "next/headers"
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
 
-import { getSupabaseEnv } from "./env"
+import { getSupabaseEnv } from "./env";
 
 export async function getSupabaseServerClient() {
-  const env = getSupabaseEnv()
-  const cookieStore = await cookies()
+  const env = getSupabaseEnv("creating server client");
+  const cookieStore = await cookies();
 
   return createServerClient(env.url, env.anonKey, {
     cookies: {
       getAll() {
-        return cookieStore.getAll()
+        return cookieStore.getAll();
       },
       setAll(cookiesToSet) {
         cookiesToSet.forEach((cookie) => {
-          cookieStore.set(cookie.name, cookie.value, cookie.options)
-        })
+          cookieStore.set(cookie.name, cookie.value, cookie.options);
+        });
       },
     },
-  })
+  });
 }

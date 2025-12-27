@@ -1,15 +1,15 @@
-import { createBrowserClient } from "@supabase/ssr"
+import { createBrowserClient } from "@supabase/ssr";
 
-import { getSupabaseEnv, hasSupabaseEnv } from "./env"
+import { getSupabaseEnvOptional } from "./env";
 
 export function getSupabaseBrowserClient() {
-  if (!hasSupabaseEnv()) return null
-  
+  const env = getSupabaseEnvOptional("creating browser client");
+  if (!env) return null;
+
   try {
-    const env = getSupabaseEnv()
-    return createBrowserClient(env.url, env.anonKey)
+    return createBrowserClient(env.url, env.anonKey);
   } catch (error) {
-    console.error("Failed to create Supabase client:", error)
-    return null
+    console.error("Failed to create Supabase client:", error);
+    return null;
   }
 }

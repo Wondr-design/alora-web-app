@@ -83,6 +83,11 @@ Interview list/detail endpoints use Redis caching with stale-while-revalidate fo
 The app also exposes tRPC at `/api/trpc` for typed, batched calls (file uploads still use REST).
 Legacy REST endpoints under `/api/*` remain available for external callers or fallback usage, but the UI now uses tRPC for interviews, schedules, notifications, presence, and events.
 
+Supabase envs (must be set in deployment too):
+- `NEXT_PUBLIC_SUPABASE_URL` (https://... from Supabase project settings)
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY` (anon/public API key)
+- `SUPABASE_SERVICE_ROLE_KEY` (server only; do NOT prefix with NEXT_PUBLIC)
+
 Legacy REST endpoints (kept for external callers):
 - `GET /api/interviews`
 - `GET /api/interviews/[interviewId]`
