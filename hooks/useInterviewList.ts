@@ -2,23 +2,29 @@
 
 import { useEffect, useState } from "react"
 
-import { apiClient, type InterviewListItem } from "@/lib/apiClient"
 import { getSupabaseBrowserClient } from "@/lib/supabase/client"
+import { trpc } from "@/lib/trpc/client"
 import { useInterviewListStore } from "@/stores/interviewListStore"
 
+const REALTIME_REFRESH_DEBOUNCE_MS = 400
+type SupabaseClient = NonNullable<ReturnType<typeof getSupabaseBrowserClient>>
+
 export function useInterviewList() {
-  const [interviews, setInterviews] = useState<InterviewListItem[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
-  const localInterviews = useInterviewListStore((state) => state.interviews)
+  const utils = trpc.useUtils()
+  const interviews = useInterviewListStore((state) => state.interviews)
+  const setInterviews = useInterviewListStore((state) => state.setInterviews)
+  const clearInterviews = useInterviewListStore((state) => state.clearInterviews)
 
   useEffect(() => {
     const supabase = getSupabaseBrowserClient()
     let isMounted = true
+    let channel: ReturnType<SupabaseClient["channel"]> | null = null
+    let refreshTimeout: ReturnType<typeof setTimeout> | null = null
+    let currentUserId: string | null = null
 
     if (!supabase) {
-      setIsAuthenticated(false)
       setIsLoading(false)
       return () => {
         isMounted = false
@@ -27,21 +33,66 @@ export function useInterviewList() {
 
     const supabaseClient = supabase
 
-    async function load() {
-      setIsLoading(true)
+    const scheduleRefresh = () => {
+      if (!isMounted) return
+      if (refreshTimeout) return
+      refreshTimeout = setTimeout(() => {
+        refreshTimeout = null
+        void load({ silent: true })
+      }, REALTIME_REFRESH_DEBOUNCE_MS)
+    }
+
+    const subscribeToChanges = (userId: string) => {
+      if (channel) {
+        supabaseClient.removeChannel(channel)
+      }
+      channel = supabaseClient
+        .channel(`interviews-${userId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "interviews",
+            filter: `user_id=eq.${userId}`,
+          },
+          () => {
+            scheduleRefresh()
+          }
+        )
+        .subscribe()
+    }
+
+    async function load(options?: { silent?: boolean }) {
+      if (!options?.silent) {
+        setIsLoading(true)
+      }
       setError(null)
       const { data } = await supabaseClient.auth.getSession()
+      if (!isMounted) return
 
       if (!data.session) {
         if (!isMounted) return
-        setIsAuthenticated(false)
-        setIsLoading(false)
+        clearInterviews()
+        currentUserId = null
+        if (channel) {
+          supabaseClient.removeChannel(channel)
+          channel = null
+        }
+        if (!options?.silent) {
+          setIsLoading(false)
+        }
         return
       }
 
+      const userId = data.session.user.id
+      if (userId && userId !== currentUserId) {
+        currentUserId = userId
+        subscribeToChanges(userId)
+      }
+
       try {
-        setIsAuthenticated(true)
-        const res = await apiClient.listInterviews()
+        const res = await utils.interviews.list.fetch()
         if (!isMounted) return
         setInterviews(res.interviews)
       } catch (err) {
@@ -50,7 +101,9 @@ export function useInterviewList() {
         setError(message)
       } finally {
         if (!isMounted) return
-        setIsLoading(false)
+        if (!options?.silent) {
+          setIsLoading(false)
+        }
       }
     }
 
@@ -59,21 +112,20 @@ export function useInterviewList() {
     const {
       data: { subscription },
     } = supabaseClient.auth.onAuthStateChange((_event, session) => {
-      setIsAuthenticated(Boolean(session))
+      if (!isMounted) return
+      if (!session) {
+        clearInterviews()
+      }
       void load()
     })
 
     return () => {
       isMounted = false
+      if (refreshTimeout) clearTimeout(refreshTimeout)
+      if (channel) supabaseClient.removeChannel(channel)
       subscription.unsubscribe()
     }
-  }, [])
-
-  useEffect(() => {
-    if (isAuthenticated !== false) return
-    setInterviews(localInterviews)
-    setIsLoading(false)
-  }, [isAuthenticated, localInterviews])
+  }, [clearInterviews, setInterviews, utils])
 
   return { interviews, isLoading, error }
 }

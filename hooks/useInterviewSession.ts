@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import {
@@ -12,9 +12,11 @@ import {
   TranscriptEntry,
 } from "@/lib/apiClient";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { trpc } from "@/lib/trpc/client";
 import { useLiveKitRoom } from "@/hooks/useLiveKitRoom";
 import { useTranscription } from "@/hooks/useTranscription";
 import { useRAGRetrieval } from "@/hooks/useRAGRetrieval";
+import { useSessionEvents } from "@/hooks/useSessionEvents";
 import { useInterviewStore } from "@/stores/interviewStore";
 import { useInterviewListStore } from "@/stores/interviewListStore";
 import { useSessionStore } from "@/stores/sessionStore";
@@ -40,6 +42,7 @@ export function useInterviewSession({
     initialSessionId || null
   );
   const [agentDetected, setAgentDetected] = useState(false);
+  const [agentEverDetected, setAgentEverDetected] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [durationSeconds, setDurationSeconds] = useState(
@@ -70,10 +73,15 @@ export function useInterviewSession({
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [latestError, setLatestError] = useState<string | null>(null);
+  const [idleDisconnectNotice, setIdleDisconnectNotice] = useState<string | null>(null);
   const [ragDebugOpen, setRagDebugOpen] = useState(false);
   const [ragQuery, setRagQuery] = useState("");
   const [ragLastRunAt, setRagLastRunAt] = useState<number | null>(null);
   const [ragLastQuery, setRagLastQuery] = useState<string | null>(null);
+  const lastAgentEventRef = useRef<"connected" | "disconnected" | null>(null);
+  const { mutateAsync: logSessionEvent } = trpc.events.log.useMutation();
+  const { mutateAsync: completeInterview } = trpc.interviews.complete.useMutation();
+  const { mutateAsync: markInterviewStarted } = trpc.interviews.start.useMutation();
 
   const { room, isConnecting, connect, disconnect, runDiagnostics } =
     useLiveKitRoom(activeSessionId || undefined);
@@ -98,6 +106,11 @@ export function useInterviewSession({
     error: ragError,
     lastRetrieved,
   } = useRAGRetrieval(activeSessionId ?? null);
+  const {
+    events: sessionEvents,
+    isLoading: sessionEventsLoading,
+    error: sessionEventsError,
+  } = useSessionEvents(activeSessionId ?? null);
 
   useTranscription(room ?? null);
 
@@ -147,18 +160,66 @@ export function useInterviewSession({
       });
 
       setAgentDetected(Boolean(agent));
+      if (agent) {
+        setAgentEverDetected(true);
+      }
     };
 
     checkForAgent();
     const handleParticipantConnected = () => setTimeout(checkForAgent, 400);
+    const handleParticipantDisconnected = () => setTimeout(checkForAgent, 400);
     room.on("participantConnected", handleParticipantConnected);
     room.on("trackPublished", handleParticipantConnected);
+    room.on("participantDisconnected", handleParticipantDisconnected);
 
     return () => {
       room.off("participantConnected", handleParticipantConnected);
       room.off("trackPublished", handleParticipantConnected);
+      room.off("participantDisconnected", handleParticipantDisconnected);
     };
   }, [room, isConnected]);
+
+  useEffect(() => {
+    if (!room) {
+      setAgentEverDetected(false);
+    }
+  }, [room]);
+
+  useEffect(() => {
+    lastAgentEventRef.current = null;
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    if (!activeSessionId) return;
+    if (!agentEverDetected && !agentDetected) return;
+    const next = agentDetected ? "connected" : "disconnected";
+    if (lastAgentEventRef.current === next) return;
+    lastAgentEventRef.current = next;
+    void logSessionEvent({
+      sessionId: activeSessionId,
+      eventType: `agent_${next}`,
+      payload: {
+        detected: agentDetected,
+        timestamp: Date.now(),
+      },
+    })
+      .catch(() => {});
+  }, [activeSessionId, agentDetected, agentEverDetected, logSessionEvent]);
+
+  useEffect(() => {
+    if (!isRunning) return;
+    if (agentDetected) {
+      setIdleDisconnectNotice(null);
+      return;
+    }
+    if (agentEverDetected && !agentDetected) {
+      setIsRunning(false);
+      setIdleDisconnectNotice(
+        "Agent disconnected due to inactivity. Press the green button to resume."
+      );
+      disconnect(true);
+    }
+  }, [agentDetected, agentEverDetected, disconnect, isRunning]);
 
   const endInterview = useCallback(
     (reason: SummaryReason) => {
@@ -224,16 +285,16 @@ export function useInterviewSession({
           });
           setSummaryData(summary);
           try {
-            await apiClient.completeInterview({
-              session_id: sessionId,
+            await completeInterview({
+              sessionId,
               transcript: transcriptPayload,
               summary,
-              ended_by: reason,
-              target_duration_seconds: durationSeconds,
-              actual_duration_seconds: actualDurationSeconds,
-              turns_total: totalTurns,
-              turns_user: userTurns,
-              turns_ai: aiTurns,
+              endedBy: reason,
+              targetDurationSeconds: durationSeconds,
+              actualDurationSeconds: actualDurationSeconds,
+              turnsTotal: totalTurns,
+              turnsUser: userTurns,
+              turnsAi: aiTurns,
             });
           } catch {
           }
@@ -273,6 +334,8 @@ export function useInterviewSession({
     },
     [
       activeSessionId,
+      addLocalInterview,
+      completeInterview,
       disconnect,
       durationSeconds,
       remainingSeconds,
@@ -326,6 +389,7 @@ export function useInterviewSession({
 
     setIsStarting(true);
     setLatestError(null);
+    setIdleDisconnectNotice(null);
     setSummaryOpen(false);
     setSummaryData(null);
     setSummaryError(null);
@@ -334,6 +398,10 @@ export function useInterviewSession({
       const session = await ensureSession();
       setRemainingSeconds(durationSeconds);
       await connect(session);
+      try {
+        await markInterviewStarted({ sessionId: session });
+      } catch {
+      }
       setSessionStartedAt(Date.now());
       setIsRunning(true);
     } catch (err) {
@@ -342,7 +410,14 @@ export function useInterviewSession({
     } finally {
       setIsStarting(false);
     }
-  }, [connect, durationSeconds, endInterview, ensureSession, isRunning]);
+  }, [
+    connect,
+    durationSeconds,
+    endInterview,
+    ensureSession,
+    isRunning,
+    markInterviewStarted,
+  ]);
 
   const handleExit = useCallback(() => {
     disconnect();
@@ -463,6 +538,7 @@ export function useInterviewSession({
     uploading,
     uploadError,
     latestError,
+    idleDisconnectNotice,
     ragDebugOpen,
     ragQuery,
     ragLastRunAt,
@@ -474,6 +550,9 @@ export function useInterviewSession({
     ragIsRetrieving,
     ragError,
     lastRetrieved,
+    sessionEvents,
+    sessionEventsLoading,
+    sessionEventsError,
     messages,
     streamingMessageText: streamingMessage?.text ?? "",
     lastUserMessage,
@@ -509,6 +588,7 @@ function createLocalInterviewItem({
     created_at: new Date().toISOString(),
     ended_at: new Date().toISOString(),
     duration_seconds: durationSeconds ?? null,
+    title: summary.title,
     summary_preview: buildSummaryPreview(summary.overall_summary),
   };
 }

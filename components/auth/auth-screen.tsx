@@ -1,6 +1,7 @@
 "use client"
 
-import { useRef, useState } from "react"
+import type { BaseSyntheticEvent } from "react"
+import { useState } from "react"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useForm } from "react-hook-form"
@@ -12,7 +13,6 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/client"
 
 export function AuthScreen() {
   const supabase = getSupabaseBrowserClient()
-  const passwordActionRef = useRef<PasswordAction>("sign-in")
   const [statusMessage, setStatusMessage] = useState("")
   const [statusError, setStatusError] = useState("")
   const [isGoogleLoading, setIsGoogleLoading] = useState(false)
@@ -76,7 +76,10 @@ export function AuthScreen() {
     setIsGoogleLoading(false)
   }
 
-  async function handlePasswordSubmit(values: PasswordFormValues) {
+  async function handlePasswordSubmit(
+    values: PasswordFormValues,
+    event?: BaseSyntheticEvent
+  ) {
     if (!supabase) {
       setStatus({ error: "Auth is not configured." })
       return
@@ -85,7 +88,12 @@ export function AuthScreen() {
     setIsPasswordLoading(true)
     setStatus({ message: "", error: "" })
 
-    const isSignUp = passwordActionRef.current === "sign-up"
+    const submitter = event?.nativeEvent
+      ? ((event.nativeEvent as SubmitEvent).submitter as HTMLElement | null)
+      : null
+    const actionValue = submitter?.getAttribute("data-action")
+    const action: PasswordAction = actionValue === "sign-up" ? "sign-up" : "sign-in"
+    const isSignUp = action === "sign-up"
     const result = isSignUp
       ? await supabase.auth.signUp({
           email: values.email,
@@ -201,9 +209,7 @@ export function AuthScreen() {
               <div className="flex gap-3">
                 <Button
                   type="submit"
-                  onClick={() => {
-                    passwordActionRef.current = "sign-in"
-                  }}
+                  data-action="sign-in"
                   disabled={isPasswordLoading}
                   className="flex-1 rounded-full"
                 >
@@ -211,9 +217,7 @@ export function AuthScreen() {
                 </Button>
                 <Button
                   type="submit"
-                  onClick={() => {
-                    passwordActionRef.current = "sign-up"
-                  }}
+                  data-action="sign-up"
                   disabled={isPasswordLoading}
                   variant="secondary"
                   className="flex-1 rounded-full"

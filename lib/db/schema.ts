@@ -78,6 +78,10 @@ export const interviews = pgTable(
     sessionId: text("session_id").notNull(),
     status: interviewStatusEnum("status").notNull(),
     title: text("title"),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+    scheduledTimezone: text("scheduled_timezone"),
+    autoStart: boolean("auto_start").default(false).notNull(),
+    targetDurationSeconds: integer("target_duration_seconds"),
     startedAt: timestamp("started_at", { withTimezone: true }),
     endedAt: timestamp("ended_at", { withTimezone: true }),
     durationSeconds: integer("duration_seconds"),
@@ -92,6 +96,7 @@ export const interviews = pgTable(
   (table) => ({
     userIdIndex: index("interviews_user_id_idx").on(table.userId),
     statusIndex: index("interviews_status_idx").on(table.status),
+    scheduledAtIndex: index("interviews_scheduled_at_idx").on(table.scheduledAt),
   })
 )
 
@@ -159,6 +164,71 @@ export const interviewSummaries = pgTable(
     interviewIdIndex: index("interview_summaries_interview_id_idx").on(
       table.interviewId
     ),
+  })
+)
+
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    title: text("title"),
+    message: text("message"),
+    payload: jsonb("payload"),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    userIdIndex: index("notifications_user_id_idx").on(table.userId),
+    createdAtIndex: index("notifications_created_at_idx").on(table.createdAt),
+  })
+)
+
+export const userPresence = pgTable(
+  "user_presence",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    sessionId: text("session_id"),
+    status: text("status"),
+    lastSeen: timestamp("last_seen", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => ({
+    lastSeenIndex: index("user_presence_last_seen_idx").on(table.lastSeen),
+  })
+)
+
+export const sessionEvents = pgTable(
+  "session_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    sessionId: text("session_id").notNull(),
+    eventType: text("event_type").notNull(),
+    payload: jsonb("payload"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    userIdIndex: index("session_events_user_id_idx").on(table.userId),
+    sessionIdIndex: index("session_events_session_id_idx").on(table.sessionId),
+    eventTypeIndex: index("session_events_event_type_idx").on(table.eventType),
+    createdAtIndex: index("session_events_created_at_idx").on(table.createdAt),
   })
 )
 

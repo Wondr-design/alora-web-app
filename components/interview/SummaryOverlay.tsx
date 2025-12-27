@@ -22,6 +22,7 @@ interface SummaryOverlayProps {
   summary: SummaryResponse | null;
   loading: boolean;
   error: string | null;
+  mode?: "session" | "history";
 }
 
 interface SummaryThemeClasses {
@@ -205,6 +206,7 @@ export function SummaryOverlay({
   summary,
   loading,
   error,
+  mode = "session",
 }: SummaryOverlayProps) {
   if (!open) return null;
 
@@ -241,7 +243,20 @@ export function SummaryOverlay({
         className={`grid max-h-[100dvh] w-[92dvw] max-w-[92dvw] grid-rows-[auto_1fr] overflow-hidden rounded-3xl border p-0 sm:w-[90dvw] sm:!max-w-[90dvw] lg:w-[70dvw] lg:!max-w-[70dvw] ${panelClasses}`}
       >
         <div className="flex items-start justify-between gap-4 px-8 pt-8">
-          <SummaryHeader reason={reason} mutedText={mutedText} />
+          {mode === "history" ? (
+            <DialogHeader className="text-left">
+              <DialogDescription
+                className={`text-xs uppercase tracking-[0.25em] ${mutedText}`}
+              >
+                Interview summary
+              </DialogDescription>
+              <DialogTitle className="text-3xl font-semibold">
+                {summary?.title || "Session recap"}
+              </DialogTitle>
+            </DialogHeader>
+          ) : (
+            <SummaryHeader reason={reason} mutedText={mutedText} />
+          )}
           <DialogClose asChild>
             <Button
               type="button"
@@ -364,11 +379,13 @@ export function SummaryOverlay({
               </Card>
             )}
 
-            <SummaryActions
-              isDark={isDark}
-              onRestart={onRestart}
-              onClose={onClose}
-            />
+            {mode === "session" ? (
+              <SummaryActions
+                isDark={isDark}
+                onRestart={onRestart}
+                onClose={onClose}
+              />
+            ) : null}
           </div>
         </ScrollArea>
       </DialogContent>

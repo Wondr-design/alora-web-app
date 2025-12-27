@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm"
+import { and, asc, desc, eq } from "drizzle-orm"
 
 import type { SummaryResponse, TranscriptEntry } from "@/lib/apiClient"
 import { getDb } from "@/lib/db"
@@ -14,12 +14,9 @@ export async function persistInterviewSession({
   sessionId,
   transcript,
   summary,
-  endedBy,
   targetDurationSeconds,
   actualDurationSeconds,
   turnsTotal,
-  turnsUser,
-  turnsAi,
 }: PersistInterviewInput) {
   const userId = await getAuthenticatedUserId()
   if (!userId) return { stored: false }
@@ -27,12 +24,9 @@ export async function persistInterviewSession({
   const interviewId = await upsertInterview({
     userId,
     sessionId,
-    endedBy,
     targetDurationSeconds,
     actualDurationSeconds,
     turnsTotal,
-    turnsUser,
-    turnsAi,
     summary,
   })
 
@@ -49,9 +43,14 @@ export async function listUserInterviews({ userId, limit = 20 }: ListInput) {
       id: interviews.id,
       sessionId: interviews.sessionId,
       status: interviews.status,
+      title: interviews.title,
       createdAt: interviews.createdAt,
       endedAt: interviews.endedAt,
       durationSeconds: interviews.durationSeconds,
+      scheduledAt: interviews.scheduledAt,
+      scheduledTimezone: interviews.scheduledTimezone,
+      autoStart: interviews.autoStart,
+      targetDurationSeconds: interviews.targetDurationSeconds,
       summary: interviewSummaries.summary,
     })
     .from(interviews)
@@ -67,11 +66,98 @@ export async function listUserInterviews({ userId, limit = 20 }: ListInput) {
     id: row.id,
     session_id: row.sessionId,
     status: row.status,
+    title: row.title ?? null,
     created_at: row.createdAt?.toISOString() ?? new Date().toISOString(),
     ended_at: row.endedAt?.toISOString() ?? null,
     duration_seconds: row.durationSeconds ?? null,
+    scheduled_at: row.scheduledAt?.toISOString() ?? null,
+    scheduled_timezone: row.scheduledTimezone ?? null,
+    auto_start: row.autoStart ?? false,
+    target_duration_seconds: row.targetDurationSeconds ?? null,
     summary_preview: buildSummaryPreview(row.summary as SummaryResponse | null),
   }))
+}
+
+export async function getInterviewDetail({
+  interviewId,
+  userId,
+}: InterviewDetailInput) {
+  const db = getDb()
+  const [row] = await db
+    .select({
+      id: interviews.id,
+      sessionId: interviews.sessionId,
+      status: interviews.status,
+      title: interviews.title,
+      createdAt: interviews.createdAt,
+      startedAt: interviews.startedAt,
+      endedAt: interviews.endedAt,
+      durationSeconds: interviews.durationSeconds,
+      scheduledAt: interviews.scheduledAt,
+      scheduledTimezone: interviews.scheduledTimezone,
+      autoStart: interviews.autoStart,
+      targetDurationSeconds: interviews.targetDurationSeconds,
+    })
+    .from(interviews)
+    .where(and(eq(interviews.id, interviewId), eq(interviews.userId, userId)))
+    .limit(1)
+
+  if (!row) return null
+
+  const messages = await db
+    .select({
+      id: interviewMessages.id,
+      role: interviewMessages.role,
+      text: interviewMessages.text,
+      createdAt: interviewMessages.createdAt,
+    })
+    .from(interviewMessages)
+    .where(eq(interviewMessages.interviewId, interviewId))
+    .orderBy(asc(interviewMessages.createdAt))
+
+  const [summaryRow] = await db
+    .select({ summary: interviewSummaries.summary })
+    .from(interviewSummaries)
+    .where(eq(interviewSummaries.interviewId, interviewId))
+    .limit(1)
+
+  return {
+    interview: {
+      id: row.id,
+      session_id: row.sessionId,
+      status: row.status,
+      title: row.title ?? null,
+      created_at: row.createdAt?.toISOString() ?? new Date().toISOString(),
+      started_at: row.startedAt?.toISOString() ?? null,
+      ended_at: row.endedAt?.toISOString() ?? null,
+      duration_seconds: row.durationSeconds ?? null,
+      scheduled_at: row.scheduledAt?.toISOString() ?? null,
+      scheduled_timezone: row.scheduledTimezone ?? null,
+      auto_start: row.autoStart ?? false,
+      target_duration_seconds: row.targetDurationSeconds ?? null,
+    },
+    transcript: messages.map((message) => ({
+      id: message.id,
+      role: message.role,
+      text: message.text,
+      created_at: message.createdAt?.getTime() ?? Date.now(),
+    })),
+    summary: (summaryRow?.summary as SummaryResponse | null) ?? null,
+  }
+}
+
+export async function markInterviewStarted({
+  userId,
+  sessionId,
+}: MarkInterviewStartedInput) {
+  const db = getDb()
+  await db
+    .update(interviews)
+    .set({
+      status: "in_progress",
+      startedAt: new Date(),
+    })
+    .where(and(eq(interviews.userId, userId), eq(interviews.sessionId, sessionId)))
 }
 
 export async function getAuthenticatedUserId() {
@@ -87,12 +173,9 @@ export async function getAuthenticatedUserId() {
 async function upsertInterview({
   userId,
   sessionId,
-  endedBy,
   targetDurationSeconds,
   actualDurationSeconds,
   turnsTotal,
-  turnsUser,
-  turnsAi,
   summary,
 }: UpsertInterviewInput) {
   const db = getDb()
@@ -112,6 +195,7 @@ async function upsertInterview({
       : null
 
   const title =
+    summary?.title ||
     summary?.overall_summary?.slice(0, 80) ||
     `${turnsTotal ?? 0} message interview`
 
@@ -124,6 +208,7 @@ async function upsertInterview({
         title,
         endedAt,
         durationSeconds,
+        targetDurationSeconds: targetDurationSeconds ?? null,
         startedAt: existing[0].startedAt ?? startedAt,
       })
       .where(eq(interviews.id, interviewId))
@@ -141,6 +226,7 @@ async function upsertInterview({
       startedAt,
       endedAt,
       durationSeconds,
+      targetDurationSeconds: targetDurationSeconds ?? null,
     })
     .returning({ id: interviews.id })
 
@@ -190,23 +276,17 @@ interface PersistInterviewInput {
   sessionId: string
   transcript: TranscriptEntry[]
   summary: SummaryResponse
-  endedBy: "time" | "user"
   targetDurationSeconds?: number
   actualDurationSeconds?: number
   turnsTotal?: number
-  turnsUser?: number
-  turnsAi?: number
 }
 
 interface UpsertInterviewInput {
   userId: string
   sessionId: string
-  endedBy: "time" | "user"
   targetDurationSeconds?: number
   actualDurationSeconds?: number
   turnsTotal?: number
-  turnsUser?: number
-  turnsAi?: number
   summary: SummaryResponse
 }
 
@@ -218,6 +298,16 @@ interface ReplaceMessagesInput {
 interface UpsertSummaryInput {
   interviewId: string
   summary: SummaryResponse
+}
+
+interface InterviewDetailInput {
+  interviewId: string
+  userId: string
+}
+
+interface MarkInterviewStartedInput {
+  userId: string
+  sessionId: string
 }
 
 interface ListInput {

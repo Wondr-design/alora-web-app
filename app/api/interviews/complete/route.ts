@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server"
 
 import {
+  getAuthenticatedUserId,
   persistInterviewSession,
 } from "@/lib/interviews/persist"
+import { getCacheClient } from "@/lib/cache"
+import { createNotification } from "@/lib/notifications"
+import { redisKeys } from "@/lib/redis"
 
 export async function POST(request: Request) {
   try {
@@ -18,17 +22,39 @@ export async function POST(request: Request) {
         { status: 400 }
       )
 
+    const userId = await getAuthenticatedUserId()
     const result = await persistInterviewSession({
       sessionId,
       transcript,
       summary,
-      endedBy,
       targetDurationSeconds: getNumber(body.target_duration_seconds),
       actualDurationSeconds: getNumber(body.actual_duration_seconds),
       turnsTotal: getNumber(body.turns_total),
-      turnsUser: getNumber(body.turns_user),
-      turnsAi: getNumber(body.turns_ai),
     })
+
+    if (userId && result.interviewId) {
+      const redis = getCacheClient()
+      if (redis) {
+        await redis.del(
+          redisKeys.interviewList(userId),
+          redisKeys.interviewDetail(userId, result.interviewId)
+        )
+      }
+      try {
+        await createNotification({
+          userId,
+          type: "interview_completed",
+          title: "Interview completed",
+          message: "Your interview summary is ready.",
+          payload: {
+            interview_id: result.interviewId,
+            session_id: sessionId,
+            ended_by: endedBy,
+          },
+        })
+      } catch {
+      }
+    }
 
     return NextResponse.json(result)
   } catch (error) {

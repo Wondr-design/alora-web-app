@@ -56,4 +56,125 @@ User tracking (who/where/how long)
 PostHog/Amplitude for user activity + cohorts.
 Store server‑side events (session start/end, duration, uploads) in your DB for accuracy.
 If you need geo, resolve IP at the edge and store a coarse region.
+
+## Scheduling + Redis
+
+Required server env vars:
+
+- `REDIS_URL` (Coolify internal Redis URL, or Supabase Cache URL)
+- `SUPABASE_REDIS_URL` (optional fallback if you want to keep Supabase’s variable name)
+- `REDIS_PREFIX` (optional key prefix, defaults to `alora`)
+- `INTERVIEW_CACHE_TTL_SECONDS` (fresh cache window, seconds)
+- `INTERVIEW_CACHE_STALE_SECONDS` (serve stale while revalidating, seconds)
+- `RESEND_API_KEY`
+- `RESEND_FROM_EMAIL`
+- `APP_BASE_URL` (used in schedule emails)
+- `CRON_SECRET` (protects reminder cron endpoint)
+
+Schedule reminders are queued in Redis and sent by a cron call to:
+
+```
+POST /api/cron/schedules
+Header: x-cron-secret: <CRON_SECRET>
+```
+
+Store schedule timestamps as UTC; the UI renders in the viewer’s local time.
+Interview list/detail endpoints use Redis caching with stale-while-revalidate for fast loads.
+The app also exposes tRPC at `/api/trpc` for typed, batched calls (file uploads still use REST).
+Legacy REST endpoints under `/api/*` remain available for external callers or fallback usage, but the UI now uses tRPC for interviews, schedules, notifications, presence, and events.
+
+Legacy REST endpoints (kept for external callers):
+- `GET /api/interviews`
+- `GET /api/interviews/[interviewId]`
+- `POST /api/interviews/start`
+- `POST /api/interviews/complete`
+- `POST /api/schedules`
+- `GET /api/notifications`
+- `POST /api/notifications`
+- `GET /api/presence`
+- `POST /api/presence`
+- `GET /api/events`
+- `POST /api/events`
+
+tRPC equivalents:
+- `trpc.interviews.list` → `GET /api/interviews`
+- `trpc.interviews.detail` → `GET /api/interviews/[interviewId]`
+- `trpc.interviews.start` → `POST /api/interviews/start`
+- `trpc.interviews.complete` → `POST /api/interviews/complete`
+- `trpc.schedules.create` → `POST /api/schedules`
+- `trpc.notifications.list` → `GET /api/notifications`
+- `trpc.notifications.read` → `POST /api/notifications`
+- `trpc.presence.get` → `GET /api/presence`
+- `trpc.presence.ping` → `POST /api/presence`
+- `trpc.events.list` → `GET /api/events`
+- `trpc.events.log` → `POST /api/events`
+
+Keep REST (do not move to tRPC):
+- File uploads (`/documents/upload`, `/documents/text`) for multipart payloads.
+- Python AI endpoints (`/session/*`, `/token`) for cross-service calls and non-Next consumers.
+
+### Realtime updates (WebSocket)
+
+Interview list updates use Supabase Realtime. Enable it for the `interviews` table:
+
+```sql
+alter table public.interviews replica identity full;
+alter table public.interview_summaries replica identity full;
+alter table public.interview_messages replica identity full;
+alter table public.notifications replica identity full;
+alter table public.user_presence replica identity full;
+alter table public.session_events replica identity full;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'interviews'
+  ) then
+    alter publication supabase_realtime add table public.interviews;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'interview_summaries'
+  ) then
+    alter publication supabase_realtime add table public.interview_summaries;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'interview_messages'
+  ) then
+    alter publication supabase_realtime add table public.interview_messages;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'notifications'
+  ) then
+    alter publication supabase_realtime add table public.notifications;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'user_presence'
+  ) then
+    alter publication supabase_realtime add table public.user_presence;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'session_events'
+  ) then
+    alter publication supabase_realtime add table public.session_events;
+  end if;
+end $$;
+```
 # alora-web-app

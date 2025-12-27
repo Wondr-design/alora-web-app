@@ -13,14 +13,10 @@ export function AuthActionButton({
 }: AuthActionButtonProps) {
   const supabase = getSupabaseBrowserClient()
   const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [isInitialized, setIsInitialized] = useState(false)
+  const [isInitialized, setIsInitialized] = useState(() => !supabase)
 
   useEffect(() => {
-    if (!supabase) {
-      setIsAuthenticated(false)
-      setIsInitialized(true)
-      return
-    }
+    if (!supabase) return
 
     let isMounted = true
 

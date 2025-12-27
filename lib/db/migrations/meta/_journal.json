@@ -15,6 +15,20 @@
       "when": 1766707880556,
       "tag": "0001_freezing_vengeance",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1766771454000,
+      "tag": "0002_scheduled_interviews",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1766777800000,
+      "tag": "0003_realtime_support",
+      "breakpoints": true
     }
   ]
 }

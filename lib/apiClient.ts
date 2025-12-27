@@ -45,11 +45,6 @@ export interface DocumentsResponse {
   total_context_length?: number;
 }
 
-export interface ContextResponse {
-  session_id: string;
-  context: string;
-}
-
 export interface RetrievedChunk {
   chunk_id?: string;
   content: string;
@@ -100,6 +95,7 @@ export interface SummarySessionMeta {
 }
 
 export interface SummaryResponse {
+  title: string;
   overall_summary: string;
   scorecard: SummaryScorecard;
   strengths: string[];
@@ -116,26 +112,38 @@ export interface InterviewListItem {
   id: string;
   session_id: string;
   status: string;
+  title?: string | null;
   created_at: string;
   ended_at?: string | null;
   duration_seconds?: number | null;
+  scheduled_at?: string | null;
+  scheduled_timezone?: string | null;
+  auto_start?: boolean;
+  target_duration_seconds?: number | null;
   summary_preview?: string | null;
 }
 
-export interface InterviewListResponse {
-  interviews: InterviewListItem[];
+export interface InterviewDetail {
+  interview: InterviewListItem & {
+    started_at?: string | null;
+  };
+  transcript: Array<{
+    id: string;
+    role: "agent" | "user";
+    text: string;
+    created_at: number;
+  }>;
+  summary: SummaryResponse | null;
 }
 
-export interface InterviewCompletePayload {
-  session_id: string;
-  transcript: TranscriptEntry[];
-  summary: SummaryResponse;
-  ended_by: "time" | "user";
-  target_duration_seconds?: number;
-  actual_duration_seconds?: number;
-  turns_total?: number;
-  turns_user?: number;
-  turns_ai?: number;
+export interface NotificationItem {
+  id: string;
+  type: string;
+  title?: string | null;
+  message?: string | null;
+  payload?: Record<string, unknown> | null;
+  read_at?: string | null;
+  created_at: string;
 }
 
 export interface ApiError {
@@ -206,15 +214,6 @@ export const apiClient = {
     }
   },
 
-  async getSessionContext(sessionId: string): Promise<ContextResponse> {
-    try {
-      const res = await api.get<ContextResponse>(`/session/${sessionId}/context`);
-      return res.data;
-    } catch (error) {
-      throw handleError(error);
-    }
-  },
-
   async uploadDocument(
     sessionId: string,
     file: File,
@@ -265,23 +264,6 @@ export const apiClient = {
     }
   },
 
-  async completeInterview(payload: InterviewCompletePayload): Promise<void> {
-    try {
-      await appApi.post("/api/interviews/complete", payload);
-    } catch (error) {
-      throw handleError(error);
-    }
-  },
-
-  async listInterviews(): Promise<InterviewListResponse> {
-    try {
-      const res = await appApi.get<InterviewListResponse>("/api/interviews");
-      return res.data;
-    } catch (error) {
-      throw handleError(error);
-    }
-  },
-
   async deleteDocument(documentId: string, sessionId: string): Promise<void> {
     try {
       await api.delete(`/documents/${documentId}`, {
@@ -320,4 +302,5 @@ export const apiClient = {
       throw handleError(error);
     }
   },
+
 };
